@@ -172,3 +172,32 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Python
+*.pyc
+__pycache__/
+venv/
+env/
+*.env
+.env
+
+# Secrets (add any specific secret file names you might use)
+secrets.ini
+# If you accidentally put a key in config, uncomment below and use .env instead!
+# config/secrets.py
+
+# Output & Temporary Files
+output/
+checkpoints/
+*.pdf
+*.pkl
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE specific files
+.idea/
+.vscode/
+
