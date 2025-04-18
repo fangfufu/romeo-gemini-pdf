@@ -142,10 +142,11 @@ def create_side_by_side_pdf(play_structure, output_filepath):
             story.append(Spacer(1, 0.05*inch)) # Small space after dialogue lines
             item_count += 1
         elif el_type == 'stage_direction':
-             # Show original stage direction, styled, not in side-by-side table
+             original_text = element.get('original', '') # Get the original text
+             cleaned_original_text = original_text.replace('_', '')
              story.append(Spacer(1, 0.1*inch)) # Space before direction
-             # Use a centered style for directions now
-             story.append(Paragraph(original_text, styles['StageDirectionCentered'])) # Using a new centered style
+             # Use the CLEANED text in the Paragraph
+             story.append(Paragraph(cleaned_original_text, styles['StageDirectionCentered']))
              story.append(Spacer(1, 0.1*inch)) # Space after direction
              item_count += 1
         # else: ignore 'unknown' type for now
