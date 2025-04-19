@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 import time
 import pickle
 import sys
-from src.pdf_generator import create_side_by_side_pdf
+from src.pdf_generator_weasyprint import create_pdf_weasyprint
 
 # Ensure the parser can be found (if running main.py from project root)
 # If 'src' is not in the Python path, this helps find the parser module
@@ -123,99 +123,156 @@ def main():
          already_translated_count = sum(1 for element in play_structure if element.get('translated'))
          print(f"Resumed from checkpoint. {len(play_structure)} elements loaded, {already_translated_count} previously translated.")
 
-    # 3. Translation Loop (Placeholder - To be implemented next)
     # 3. Translation Loop
-    print("\n--- Translation Phase ---")
-    translated_in_session = 0
+     # 3. Translation Loop (with Dialogue Chunking)
+    print("\n--- Translation Phase (Chunking Dialogue) ---")
+    translated_chunks_in_session = 0 # Count chunks translated
     api_errors = 0
-    CHECKPOINT_INTERVAL = 20  # Save progress every N translations
-    TRANSLATION_DELAY = 2 # Seconds between API calls to avoid rate limits
-
-    # Keep track of the current speaker for context
-    loop_current_speaker = None
+    CHECKPOINT_INTERVAL = 10  # Save progress every N CHUNKS translated
+    TRANSLATION_DELAY = 2 # Seconds between API calls
 
     total_elements = len(play_structure)
-    for index, element in enumerate(play_structure):
+    index = 0
+    while index < total_elements:
+        element = play_structure[index]
+        element_type = element.get('type')
 
-        # Update current speaker when encountered
-        if element['type'] == 'speaker':
-            loop_current_speaker = element['original']
-            continue # Speakers don't need translation
+        # --- Find speaker for context ---
+        # Find the most recent speaker BEFORE the current index
+        loop_current_speaker = None
+        for i in range(index - 1, -1, -1):
+            if play_structure[i].get('type') == 'speaker':
+                loop_current_speaker = play_structure[i].get('original')
+                break
 
-        # Check if element is translatable and not already translated
-        if element['type'] in ['dialogue', 'stage_direction'] and not element.get('translated'):
+        # --- Check if element needs translation ---
+        needs_translation = False
+        if element_type in ['dialogue', 'stage_direction'] and not element.get('translated'):
+            needs_translation = True
 
-            original_text = element['original']
-            element_type = element['type']
-            print(f"\nTranslating element {index + 1}/{total_elements} ({element_type}): {original_text[:80]}...") # Print start of text
+        if not needs_translation:
+            index += 1
+            continue # Move to the next element
 
-            # --- Construct the Prompt ---
-            # Customize this prompt to refine the style!
-            style_instruction = "British 'Chav' style, but prioritize character voice over heavy caricature"
-            context = f" The speaker is {loop_current_speaker}." if element_type == 'dialogue' and loop_current_speaker else ""
+        # --- Process Translation ---
+        original_texts_chunk = []
+        indices_in_chunk = []
+        context_speaker = loop_current_speaker # Speaker context for this chunk
 
-            # Make the instruction more direct and add a negative constraint
-            prompt_text = f"""Directly translate the following Shakespearean text into {style_instruction}. {context} 
+        # If it's dialogue, try to chunk consecutive lines from the same speaker
+        if element_type == 'dialogue':
+            chunk_speaker = loop_current_speaker
+            # Look ahead to gather consecutive dialogue from the same speaker
+            j = index
+            while j < total_elements:
+                next_element = play_structure[j]
+                # Find speaker for next element if needed (only matters for dialogue)
+                next_speaker = None
+                if next_element.get('type') == 'dialogue':
+                     for i in range(j - 1, -1, -1):
+                        if play_structure[i].get('type') == 'speaker':
+                            next_speaker = play_structure[i].get('original')
+                            break
+
+                # Conditions to continue chunk: same type, same speaker, not already translated
+                if (next_element.get('type') == 'dialogue' and
+                        next_speaker == chunk_speaker and
+                        not next_element.get('translated')):
+                    original_texts_chunk.append(next_element['original'])
+                    indices_in_chunk.append(j)
+                    j += 1
+                else:
+                    break # End of chunk
+            # Update outer loop index to skip processed elements
+            next_index_after_chunk = j
+        else:
+            # Stage direction - process individually
+            original_texts_chunk.append(element['original'])
+            indices_in_chunk.append(index)
+            next_index_after_chunk = index + 1
+            context_speaker = None # No speaker context for directions
+
+
+        # --- Translate the gathered chunk ---
+        if original_texts_chunk:
+            full_original_text = "\n".join(original_texts_chunk)
+            print(f"\nTranslating chunk starting element {indices_in_chunk[0] + 1}/{total_elements} ({element_type}, {len(indices_in_chunk)} lines)...")
+            print(f"Original: {full_original_text[:150]}...")
+
+            # Construct the prompt
+            style_instruction = "contemporary British urban vernacular (similar to the 'Chav' style previously discussed, focus on informal language, slang, potentially dropping 'h's or 'g's subtly where natural, but prioritize clarity and character voice over heavy caricature)"
+            context = f" The speaker is {context_speaker}." if context_speaker and element_type == 'dialogue' else ""
+            prompt_text = f"""Directly translate the following Shakespearean text chunk into {style_instruction}.{context} Maintain line breaks roughly where they occur in the original if possible, but prioritize natural flow in the target vernacular.
 Do not provide commentary, explanations, or multiple options. Only provide the single best translation in the requested style.
-Original: "{original_text}"
-Translation:"""
 
+Original Chunk:
+"{full_original_text}"
+
+Translated Chunk:"""
+
+            translation_successful = False
             try:
                 # --- Call Gemini API ---
-                # Note: Adjust generation_config if needed (temperature, etc.)
                 response = model.generate_content(prompt_text)
 
                 # --- Process Response ---
-                # Check for safety blocks or empty response before accessing text
                 if response.parts:
-                     translation = response.text.strip()
-                     element['translated'] = translation
-                     translated_in_session += 1
-                     print(f"-> Translation: {translation[:80]}...") # Print start of translation
+                     full_translation = response.text.strip()
+                     # Store full translation on the *first* element of the chunk
+                     play_structure[indices_in_chunk[0]]['translated'] = full_translation
+                     # Mark subsequent elements in the chunk
+                     for k in indices_in_chunk[1:]:
+                         play_structure[k]['translated'] = '[Translated as part of previous chunk]'
+                     translated_chunks_in_session += 1
+                     translation_successful = True
+                     print(f"-> Translation: {full_translation[:150]}...")
                 elif response.prompt_feedback.block_reason:
                      print(f"-> Blocked. Reason: {response.prompt_feedback.block_reason}")
-                     element['translated'] = f"[Translation Blocked: {response.prompt_feedback.block_reason}]" # Mark as blocked
-                     api_errors += 1 # Count blocks as errors for summary
+                     error_message = f"[Translation Blocked: {response.prompt_feedback.block_reason}]"
+                     api_errors += 1
                 else:
-                     # Handle cases where response might be empty but not explicitly blocked
                      print("-> Received empty response from API.")
-                     element['translated'] = "[Translation Error: Empty Response]"
+                     error_message = "[Translation Error: Empty Response]"
                      api_errors += 1
 
             except Exception as e:
-                # Catch potential API errors (rate limits, connection issues, etc.)
                 print(f"-> API Error: {e}")
+                error_message = f"[Translation Error: {type(e).__name__}]"
                 api_errors += 1
-                # Optional: could add logic here to retry after a longer delay
-                # For now, we just mark it and continue
-                element['translated'] = f"[Translation Error: {type(e).__name__}]"
 
+            # If translation failed, mark all elements in chunk with error
+            if not translation_successful:
+                for k in indices_in_chunk:
+                    play_structure[k]['translated'] = error_message
 
             # --- Rate Limiting ---
-            # Pause *after* every attempt (success or failure) that hit the API
-            # print(f"Waiting {TRANSLATION_DELAY}s...") # Optional verbose wait message
             time.sleep(TRANSLATION_DELAY)
 
-            # --- Save Checkpoint Periodically ---
-            if translated_in_session > 0 and translated_in_session % CHECKPOINT_INTERVAL == 0:
-                print(f"\n--- Saving checkpoint after {translated_in_session} translations in this session ---")
+            # --- Save Checkpoint Periodically (based on chunks) ---
+            if translated_chunks_in_session > 0 and translated_chunks_in_session % CHECKPOINT_INTERVAL == 0:
+                print(f"\n--- Saving checkpoint after {translated_chunks_in_session} chunks translated in this session ---")
                 save_checkpoint(play_structure, CHECKPOINT_FILE)
+
+        # Advance outer loop index
+        index = next_index_after_chunk
 
     # --- End of Loop ---
 
     print("\n--- Translation Phase Complete ---")
     # Save final state
-    if translated_in_session > 0: # Only save if work was done
+    if translated_chunks_in_session > 0: # Only save if work was done
          print("Saving final translation progress...")
          save_checkpoint(play_structure, CHECKPOINT_FILE)
 
-    final_translated_count = sum(1 for element in play_structure if element.get('translated') and not element.get('translated','').startswith('[')) # Count successful non-error translations
+    # Recalculate final counts
+    final_translated_count = sum(1 for element in play_structure if element.get('translated') and not element.get('translated','').startswith('[')) # Count successful non-error/placeholder translations
     total_translatable = sum(1 for element in play_structure if element['type'] in ['dialogue', 'stage_direction'])
     print(f"Translation Summary:")
-    print(f"- Translated in this session: {translated_in_session}")
-    print(f"- Total successfully translated: {final_translated_count} / {total_translatable}")
+    print(f"- Chunks translated in this session: {translated_chunks_in_session}")
+    # The 'final_translated_count' might be misleading now as it counts only first lines of chunks
+    # print(f"- Total successfully translated elements: {final_translated_count} / {total_translatable}") # This is less meaningful now
     print(f"- API Errors/Blocks encountered: {api_errors}")
-
+    
     # Example of how to check progress after loop (we'll build the loop next):
     final_translated_count = sum(1 for element in play_structure if element.get('translated'))
     total_translatable = sum(1 for element in play_structure if element['type'] in ['dialogue', 'stage_direction'])
@@ -223,22 +280,19 @@ Translation:"""
 
 
     # 4. PDF Generation
-    print("\n--- PDF Generation Phase ---")
-    if play_structure: # Only generate if we have data
-        pdf_output_filepath = os.path.join(OUTPUT_DIR, 'romeo_vernacular_side_by_side.pdf')
+    print("\n--- PDF Generation Phase (WeasyPrint) ---")
+    if play_structure:
+        pdf_output_filepath = os.path.join(OUTPUT_DIR, 'romeo_weasyprint_side_by_side.pdf') # New name
+        css_filepath = os.path.join(PROJECT_ROOT, 'config', 'style_weasy.css') # Path to CSS
         try:
-            # Ensure output directory exists
-            os.makedirs(OUTPUT_DIR, exist_ok=True)
-            create_side_by_side_pdf(play_structure, pdf_output_filepath)
+            os.makedirs(OUTPUT_DIR, exist_ok=True) # Ensure output dir exists
+            # NOTE: Need to create/update front_matter_html helper first!
+            # For now, just call with main structure
+            create_pdf_weasyprint(play_structure, pdf_output_filepath, css_filepath)
         except Exception as e:
-            print(f"An error occurred during PDF generation: {e}")
+            print(f"An error occurred during WeasyPrint PDF generation: {e}")
     else:
         print("Skipping PDF generation because play structure is empty.")
-
-
-    end_time = time.time()
-    print(f"\n--- Project execution finished in {end_time - start_time:.2f} seconds ---")
-
 
 if __name__ == "__main__":
     main()

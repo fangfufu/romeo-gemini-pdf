@@ -1,0 +1,153 @@
+/* config/style_weasy.css */
+
+/* --- Page Setup (KDP 8.25x11 Hardback) --- */
+@page {
+    size: 8.25in 11in;
+    /* Define margins for right-hand (recto) pages */
+    margin-top: 0.75in;
+    margin-bottom: 0.75in;
+    margin-left: 0.875in; /* Gutter */
+    margin-right: 0.5in;   /* Outside */
+
+    /* Basic page numbering - Arabic */
+    @bottom-center {
+        content: counter(page);
+        font-size: 9pt;
+        font-family: sans-serif; /* Use a generic sans-serif */
+        color: #555; /* Lighter color */
+        vertical-align: top;
+        padding-top: 0.3in; /* Adjust distance from bottom */
+    }
+}
+
+@page :left {
+    /* Mirror margins for left-hand (verso) pages */
+    margin-left: 0.5in;   /* Outside */
+    margin-right: 0.875in; /* Gutter */
+}
+
+/* Remove numbering from the first page (optional) */
+@page :first {
+     @bottom-center { content: normal; }
+}
+/* TODO: Add CSS Paged Media logic for Roman numerals on front matter later */
+
+
+/* --- Body and Font --- */
+body {
+    font-family: "Times New Roman", Times, serif; /* Example serif font */
+    font-size: 10pt;
+    line-height: 1.25; /* Slightly increased leading */
+}
+
+/* --- Headings and Markers --- */
+h1.heading, h2.scenemarker {
+    text-align: center;
+    margin-top: 0.3in;
+    margin-bottom: 0.2in;
+    font-weight: bold;
+    /* Avoid breaks right after these */
+    page-break-after: avoid;
+}
+h1.heading { font-size: 14pt; }
+h2.scenemarker { font-size: 12pt; } /* Corrected name from previous error fix */
+
+p.speaker {
+    text-align: center;
+    font-weight: bold;
+    margin-top: 0.15in;
+    margin-bottom: 0.05in;
+    /* Avoid breaks right after speaker name */
+    page-break-after: avoid;
+}
+
+p.direction {
+    text-align: center; /* Or text-align: left; margin-left: 1in; */
+    font-style: italic;
+    font-size: 9pt;
+    margin-top: 0.15in;
+    margin-bottom: 0.15in;
+}
+
+/* --- Side-by-Side Layout (Using CSS Grid) --- */
+.dialogue-pair {
+    display: grid;
+    /* Two columns with explicit widths calculated for 8.25" page, 0.875" gutter, 0.5" outside, 0.25" gap */
+    grid-template-columns: 3.3125in 3.3125in;
+    column-gap: 0.25in;
+    align-items: start; /* Align items to the start (top) */
+    margin-bottom: 0.05in; /* Space between dialogue pairs */
+    /* page-break-inside: avoid; */ /* Keep commented out */
+}
+
+.col-left {
+    /* No width needed, grid handles it */
+    text-align: left;
+}
+
+.col-right {
+    /* No width needed, grid handles it */
+    text-align: left;
+}
+
+/* Style paragraphs inside the columns */
+.col-left p, .col-right p {
+    /* Remove default paragraph margins/padding */
+    margin-top: 0;
+    margin-bottom: 0;
+    padding: 0;
+    /* Add orphan/widow control for potentially better breaks */
+    orphans: 2;
+    widows: 2;
+    page-break-inside: auto; /* Explicitly allow breaks */
+}
+
+/* Style for error messages or placeholders */
+.col-right p.error {
+    color: red;
+    font-style: italic;
+}
+.col-right p.placeholder {
+    color: #aaa;
+    font-style: italic;
+}
+
+/* --- Front Matter Specific Styles --- */
+/* Basic styles added previously */
+.title-page {
+    text-align: center;
+    padding-top: 3in; /* Push content down */
+    page-break-after: always; /* Force break after title page */
+    /* Add height if needed to help control positioning */
+    /* height: 8in; */
+}
+
+.title-page h1 {
+    font-size: 24pt;
+    margin-bottom: 0.5in;
+}
+.title-page h2 {
+    font-size: 16pt;
+    margin-bottom: 1in;
+    font-style: italic;
+}
+.title-page p {
+    font-size: 12pt;
+    line-height: 1.5;
+}
+
+.copyright-page {
+    font-size: 8pt;
+    line-height: 1.3;
+    margin-top: 1in; /* Add some top margin */
+    page-break-after: always; /* Force break after copyright page */
+}
+
+.copyright-page p {
+    margin-bottom: 0.5em; /* Space between paragraphs */
+}
+
+/* Style for main content block (optional, helps if needed) */
+.main-content {
+    /* Add styles if needed, e.g., reset counters */
+}
